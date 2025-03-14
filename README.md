@@ -1,8 +1,13 @@
 # Contacts Manager Backend
 
-A backend service for managing contacts with a Domain-Driven Design (DDD) approach.
+A backend service for managing contacts with a Domain-Driven Design (DDD) approach, trying to not spend even a penny, so I've used Frugal Architecture xD
+
+- Frontend: React -> Vercel
+- Backend: Node.js -> Render
+- Database: PostgreSQL -> Supabase
 
 ## Architecture
+![Architecture](frugal-arch.png)
 
 The application follows a DDD architecture with the following layers:
 
