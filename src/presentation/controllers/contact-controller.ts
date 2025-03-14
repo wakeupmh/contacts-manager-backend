@@ -33,9 +33,34 @@ export class ContactController {
 
   uploadContacts(req: Request, res: Response): void {
     console.log(`processing contact upload`);
-    const bb = busboy({ headers: req.headers });
-
+    
+    const bb = busboy({
+      headers: req.headers,
+      limits: {
+        fileSize: 1024 * 1024 * 500, // 500MB limit
+        files: 1 // limit to only one file
+      }
+    });
+    
+    req.on('error', (err) => {
+      console.error(`Request error during upload: ${err.message}`);
+      res.status(500).json({ error: 'Upload interrupted', message: err.message });
+    });
+    
+    bb.on('error', (err) => {
+      console.error(`Busboy error during upload: ${err.message}`);
+      res.status(500).json({ error: 'Error processing upload', message: err.message });
+    });
+    
+    let uploadStartTime: number;
+    
+    bb.on('filesLimit', () => {
+      console.log(`File limit reached`);
+      res.status(400).json({ error: 'Too many files, please upload only one CSV file' });
+    });
+    
     bb.on('file', async (name, file, info) => {
+      uploadStartTime = Date.now();
       console.log(`received file with name: ${name}, filename: ${info.filename}, encoding: ${info.encoding}, mimeType: ${info.mimeType}`);
       
       if (name !== 'csv') {
@@ -43,31 +68,63 @@ export class ContactController {
         res.status(400).json({ error: 'Upload a CSV file with name "csv"' });
         return;
       }
-
-      console.log(`importing contacts from csv`);
-      const result = await this.contactImporter.importFromCsv(file);
       
-      if (!result.success) {
-        console.log(`import failed: ${result.error}`);
-        res.status(400).json({ 
-          error: result.error,
-          stats: result.stats
-        });
+      if (!info.mimeType.includes('csv') && !info.mimeType.includes('text/plain')) {
+        console.log(`invalid mime type: ${info.mimeType}`);
+        res.status(400).json({ error: 'The uploaded file must be a CSV file' });
         return;
       }
 
-      console.log(`import successful, stats: ${JSON.stringify(result.stats)}`);
-      res.status(200).json({ 
-        message: 'Contacts imported successfully',
-        stats: result.stats
-      });
+      console.log(`importing contacts from csv`);
+      
+      const processingTimeout = setTimeout(() => {
+        console.log('Still processing file, taking longer than expected');
+        res.write(JSON.stringify({ 
+          status: 'processing',
+          message: 'Your file is being processed. This may take several minutes for large files.'
+        }) + '\n');
+      }, 10000);
+      
+      try {
+        const result = await this.contactImporter.importFromCsv(file);
+        clearTimeout(processingTimeout);
+        
+        if (!result.success) {
+          console.log(`import failed: ${result.error}`);
+          res.status(400).json({ 
+            error: result.error,
+            stats: result.stats
+          });
+          return;
+        }
+        
+        const processingTime = ((Date.now() - uploadStartTime) / 1000).toFixed(2);
+        console.log(`import successful: ${JSON.stringify(result.stats)}, processing time: ${processingTime}s`);
+        res.status(200).json({ 
+          message: 'Contacts imported successfully',
+          stats: result.stats,
+          processing_time: `${processingTime} seconds`
+        });
+      } catch (error) {
+        clearTimeout(processingTimeout);
+        console.error(`Uncaught error during import: ${error instanceof Error ? error.message : String(error)}`);
+        res.status(500).json({ 
+          error: 'Failed to process CSV file',
+          message: error instanceof Error ? error.message : String(error)
+        });
+      }
     });
-
-    bb.on('error', (err) => {
-      console.log(`error processing upload: ${err instanceof Error ? err.message : String(err)}`);
-      res.status(500).json({ error: 'Error processing upload' });
+    
+    bb.on('fieldsLimit', () => {
+      console.log('Fields limit reached');
+      res.status(400).json({ error: 'Too many fields in form' });
     });
-
+    
+    bb.on('partsLimit', () => {
+      console.log('Parts limit reached');
+      res.status(400).json({ error: 'Too many parts in multipart form' });
+    });
+    
     req.pipe(bb);
   }
 }

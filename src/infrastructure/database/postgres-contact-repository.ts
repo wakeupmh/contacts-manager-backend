@@ -38,20 +38,37 @@ export class PostgresContactRepository implements ContactRepository {
       console.log(`beginning transaction`);
       await client.query('BEGIN');
       
-      const query = `
-        INSERT INTO contacts (email, first_name, last_name)
-        VALUES ($1, $2, $3)
-        ON CONFLICT (email) DO UPDATE
-        SET first_name = $2, last_name = $3
-      `;
+      const MAX_PARAMS = 65535; // parameters in a single query due to PostgreSQL limit
+      const PARAMS_PER_CONTACT = 3;
+      const MAX_CONTACTS_PER_INSERT = Math.floor(MAX_PARAMS / PARAMS_PER_CONTACT);
       
-      for (const contact of contacts) {
-        console.log(`saving contact: ${contact.email}`);
-        await client.query(query, [
+      for (let i = 0; i < contacts.length; i += MAX_CONTACTS_PER_INSERT) {
+        const batch = contacts.slice(i, i + MAX_CONTACTS_PER_INSERT);
+        console.log(`processing batch of ${batch.length} contacts, starting at index ${i}`);
+        
+        // placeholders for bulk insert: ($1, $2, $3), ($4, $5, $6), ...
+        const placeholders = batch.map((_, idx) => {
+          const offset = idx * PARAMS_PER_CONTACT;
+          return `($${offset + 1}, $${offset + 2}, $${offset + 3})`;
+        }).join(', ');
+        
+        const values = batch.flatMap(contact => [
           contact.email,
           contact.firstName,
           contact.lastName
         ]);
+        
+        const query = `
+          INSERT INTO contacts (email, first_name, last_name)
+          VALUES ${placeholders}
+          ON CONFLICT (email) DO UPDATE
+          SET first_name = EXCLUDED.first_name, 
+              last_name = EXCLUDED.last_name
+        `;
+        
+        console.log(`executing batch insert with ${batch.length} contacts`);
+        await client.query(query, values);
+        console.log(`batch insert successful`);
       }
       
       console.log(`committing transaction`);
