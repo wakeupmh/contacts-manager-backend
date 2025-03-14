@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: contacts-manager-backend
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: node dist/index.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: NODE_OPTIONS
+        value: "--max-old-space-size=4096"
+      - key: DB_POOL_MAX
+        value: "20"
+      - key: DB_POOL_IDLE_TIMEOUT
+        value: "30000"
+      - key: DB_POOL_CONNECTION_TIMEOUT
+        value: "5000"
+      - key: DB_STATEMENT_TIMEOUT
+        value: "180000"
+    autoDeploy: true

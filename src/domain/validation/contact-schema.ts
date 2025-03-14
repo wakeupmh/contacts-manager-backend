@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-// Regular expressions for additional security validation
+// regular expressions for additional security validation
 const SQL_INJECTION_PATTERN = /('|"|;|--|\/\*|\*\/|@@|@|char|nchar|varchar|nvarchar|alter|begin|cast|create|cursor|declare|delete|drop|exec|execute|fetch|insert|kill|open|select|sys|sysobjects|syscolumns|table|update|xp_)/i;
 
 export const ContactSchema = z.object({
