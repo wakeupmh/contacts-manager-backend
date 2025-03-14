@@ -26,7 +26,6 @@ export const securityMiddleware = {
     next();
   },
   
-
   validateContentType: (req: Request, res: Response, next: NextFunction) => {
     if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
       const contentType = req.headers['content-type'] || '';
@@ -49,3 +48,5 @@ export const securityMiddleware = {
     next();
   }
 };
+
+export default securityMiddleware;

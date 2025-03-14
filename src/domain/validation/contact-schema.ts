@@ -30,7 +30,7 @@ export const ContactSchema = z.object({
       console.log(`validating last name: ${val || 'null'}`);
       return val ? val.trim() : val;
     })
-    .refine(val => val === null || !SQL_INJECTION_PATTERN.test(val), {
+    .refine(val => val === null || val === undefined || !SQL_INJECTION_PATTERN.test(val), {
       message: 'Last name contains potentially unsafe characters'
     })
 });

@@ -42,14 +42,16 @@ export class ContactController {
       }
     });
     
-    req.on('error', (err) => {
-      console.error(`Request error during upload: ${err.message}`);
-      res.status(500).json({ error: 'Upload interrupted', message: err.message });
+    req.on('error', (err: unknown) => {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      console.error(`Request error during upload: ${errorMessage}`);
+      res.status(500).json({ error: 'Upload interrupted', message: errorMessage });
     });
     
-    bb.on('error', (err) => {
-      console.error(`Busboy error during upload: ${err.message}`);
-      res.status(500).json({ error: 'Error processing upload', message: err.message });
+    bb.on('error', (err: unknown) => {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      console.error(`Busboy error during upload: ${errorMessage}`);
+      res.status(500).json({ error: 'Error processing upload', message: errorMessage });
     });
     
     let uploadStartTime: number;

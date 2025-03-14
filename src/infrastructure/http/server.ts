@@ -1,4 +1,4 @@
-import express, { Express } from 'express';
+import express, { Express, RequestHandler } from 'express';
 import { setupRoutes } from './routes';
 import { ContactController } from '../../presentation/controllers/contact-controller';
 import { securityMiddleware } from './security-middleware';
@@ -11,9 +11,9 @@ export const createServer = (contactController: ContactController): Express => {
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
   
-  app.use(securityMiddleware.addSecurityHeaders);
-  app.use(securityMiddleware.sanitizeQueryParams);
-  app.use(securityMiddleware.validateContentType);
+  app.use(securityMiddleware.addSecurityHeaders as RequestHandler);
+  app.use(securityMiddleware.sanitizeQueryParams as RequestHandler);
+  app.use(securityMiddleware.validateContentType as RequestHandler);
   
   app.use((req, res, next) => {
     res.setTimeout(10 * 60 * 1000, () => {
