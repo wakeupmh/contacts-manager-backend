@@ -19,7 +19,6 @@ export const setupRoutes = (router: Router, contactController: ContactController
   );
   
   router.get('/health', (req, res) => {
-    console.log(`health check request received`);
     res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
   });
   
