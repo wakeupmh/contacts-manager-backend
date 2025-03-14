@@ -65,12 +65,6 @@ export class ContactController {
       uploadStartTime = Date.now();
       console.log(`received file with name: ${name}, filename: ${info.filename}, encoding: ${info.encoding}, mimeType: ${info.mimeType}`);
       
-      if (name !== 'csv') {
-        console.log(`invalid file field name: ${name}, expected: csv`);
-        res.status(400).json({ error: 'Upload a CSV file with name "csv"' });
-        return;
-      }
-      
       if (!info.mimeType.includes('csv') && !info.mimeType.includes('text/plain')) {
         console.log(`invalid mime type: ${info.mimeType}`);
         res.status(400).json({ error: 'The uploaded file must be a CSV file' });
