@@ -33,20 +33,18 @@ export class ContactImporter {
       let totalCount = 0;
       let currentBatch = 0;
 
-      console.log(`setting up csv parser`);
       fileStream
         .pipe(csvParser())
         .on('headers', (headers: string[]) => {
-          console.log(`csv headers received: ${headers.join(', ')}`);
-          emailColumn = headers.find((h: string) => h.toLowerCase().includes('email'));
-          firstNameColumn = headers.find((h: string) => h.toLowerCase().includes('first'));
-          lastNameColumn = headers.find((h: string) => h.toLowerCase().includes('last'));
+          emailColumn = headers.find((header: string) => header.toLowerCase() === 'email');
+          firstNameColumn = headers.find((header: string) => header.toLowerCase() === 'first_name');
+          lastNameColumn = headers.find((header: string) => header.toLowerCase() === 'last_name');
 
           console.log(`identified columns - email: ${emailColumn}, first name: ${firstNameColumn}, last name: ${lastNameColumn}`);
 
           if (!emailColumn || !firstNameColumn) {
             error = 'CSV must contain email and first name columns';
-            console.log(`missing required columns: ${!emailColumn ? 'email' : ''} ${!firstNameColumn ? 'first name' : ''}`);
+            console.error(`missing required columns: ${!emailColumn ? 'email' : ''} ${!firstNameColumn ? 'first name' : ''}`);
             fileStream.resume();
             return;
           }
@@ -57,7 +55,7 @@ export class ContactImporter {
           
           totalCount++;
           
-          if (totalCount % 10000 === 0) {
+          if (totalCount % this.batchSize === 0) {
             console.log(`processing row ${totalCount}`);
           }
 
@@ -81,7 +79,7 @@ export class ContactImporter {
                 await this.contactService.saveContacts(contacts);
                 console.log(`batch ${currentBatch} saved successfully`);
               } catch (err) {
-                console.log(`error saving batch ${currentBatch}: ${err instanceof Error ? err.message : String(err)}`);
+                console.error(`error saving batch ${currentBatch}: ${err instanceof Error ? err.message : String(err)}`);
                 error = err instanceof Error ? err.message : 'Unknown error during import';
               }
               
@@ -92,18 +90,27 @@ export class ContactImporter {
           } catch (err) {
             invalidCount++;
             
-            if (invalidCount % 1000 === 0) {
+            if (err instanceof z.ZodError) {
+              const errorMessages = err.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
+              console.error(`validation error in row ${totalCount} with data: ${JSON.stringify(row)}`);
+              console.error(`error details: ${errorMessages}`);
+            } else {
+              console.error(`error in row ${totalCount} with data: ${JSON.stringify(row)}`);
+              console.error(`error details: ${err instanceof Error ? err.message : String(err)}`);
+            }
+            
+            if (invalidCount % this.batchSize === 0) {
               if (err instanceof z.ZodError) {
                 const errorMessages = err.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
-                console.log(`${invalidCount} validation errors so far. Last error in row ${totalCount}: ${errorMessages}`);
+                console.error(`${invalidCount} validation errors so far. Last error in row ${totalCount}: ${errorMessages}`);
               } else {
-                console.log(`${invalidCount} errors so far. Last error in row ${totalCount}: ${err instanceof Error ? err.message : String(err)}`);
+                console.error(`${invalidCount} errors so far. Last error in row ${totalCount}: ${err instanceof Error ? err.message : String(err)}`);
               }
             }
           }
         })
         .on('end', async () => {
-          console.log(`csv parsing complete. total: ${totalCount}, valid: ${validCount}, invalid: ${invalidCount}`);
+          console.log(`csv parsing complete => total: ${totalCount}, valid: ${validCount}, invalid: ${invalidCount}`);
           
           if (error) {
             console.log(`import failed due to error: ${error}`);
@@ -142,7 +149,7 @@ export class ContactImporter {
           }
 
           if (validCount === 0) {
-            console.log(`import failed: no valid contacts found`);
+            console.error(`import failed: no valid contacts found`);
             resolve({ 
               success: false, 
               error: 'No valid contacts found in CSV',

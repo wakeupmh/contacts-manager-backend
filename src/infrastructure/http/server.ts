@@ -2,6 +2,7 @@ import express, { Express, RequestHandler } from 'express';
 import { setupRoutes } from './routes';
 import { ContactController } from '../../presentation/controllers/contact-controller';
 import { securityMiddleware } from './security-middleware';
+import cors from 'cors';
 
 export const createServer = (contactController: ContactController): Express => {
   console.log(`creating server`);
@@ -14,6 +15,7 @@ export const createServer = (contactController: ContactController): Express => {
   app.use(securityMiddleware.addSecurityHeaders as RequestHandler);
   app.use(securityMiddleware.sanitizeQueryParams as RequestHandler);
   app.use(securityMiddleware.validateContentType as RequestHandler);
+  app.use(cors());
   
   app.use((req, res, next) => {
     res.setTimeout(10 * 60 * 1000, () => {

@@ -31,7 +31,7 @@ The application follows a DDD architecture with the following layers:
 ## Getting Started
 
 ### Prerequisites
-- Node.js (v14+)
+- Node.js (v20+)
 - PostgreSQL database
 
 ### Installation
@@ -60,6 +60,26 @@ For development:
 ```
 npm run dev
 ```
+
+## Self-Ping Mechanism
+
+The application includes a self-ping mechanism that helps keep the service active by making periodic requests to its own `/health` endpoint. 
+This is particularly useful for preventing the application from going idle on Render as it has a inactivity timeouts.
+
+### Configuration
+
+The self-ping mechanism can be configured using the following environment variables:
+
+- `APP_URL`: The URL of the application (default: `http://localhost:3000`)
+- `PING_INTERVAL_MINUTES`: How often to ping the application in minutes (default: `5`)
+
+
+### How It Works
+
+1. When the application starts, it initializes the self-ping service, because Render free tier has a spin down policy, so it's a lil hack to achieve the availability.
+2. The service makes HTTP requests to the application's `/health` endpoint at regular intervals
+3. These requests help keep the application active and prevent it from being terminated due to inactivity
+4. The service logs the results of each ping for monitoring purposes
 
 ## API Endpoints
 
@@ -94,6 +114,28 @@ This application is optimized to efficiently handle large CSV files with up to 1
 - Increased file size limits (up to 500MB)
 - Comprehensive error handling and progress reporting
 - Memory-efficient stream processing
+
+### Why Busboy Instead of Multer
+
+This application uses Busboy for file upload handling instead of the more commonly used Multer middleware. Here's why Busboy is superior for handling large files:
+
+#### Memory Efficiency
+- **Busboy**: Processes files as streams, never loading the entire file into memory
+- **Multer**: By default, buffers entire files in memory before processing, which can cause out-of-memory errors with large files
+
+#### Fine-grained Control
+- **Busboy**: Provides low-level access to multipart form parsing, allowing custom handling of each file chunk
+- **Multer**: Abstracts away the parsing process, making it harder to implement custom streaming logic
+
+#### Error Handling
+- **Busboy**: Offers better error handling for partial uploads and network interruptions
+- **Multer**: Less granular error handling, especially for stream-related issues
+
+#### Performance
+- **Busboy**: Significantly lower memory footprint for large files (500MB+)
+- **Multer**: Memory usage scales linearly with file size, becoming problematic for large uploads
+
+For our use case of processing potentially large CSV files (up to 1 million records), Busboy's streaming approach provides the optimal balance of performance, reliability, and memory efficiency.
 
 ### Performance Configuration
 - Configurable database connection pool settings via environment variables:
