@@ -95,6 +95,32 @@ This application is optimized to efficiently handle large CSV files with up to 1
 - Comprehensive error handling and progress reporting
 - Memory-efficient stream processing
 
+### Why Busboy Instead of Multer
+
+This application uses Busboy for file upload handling instead of the more commonly used Multer middleware. Here's why Busboy is superior for handling large files:
+
+#### Memory Efficiency
+- **Busboy**: Processes files as streams, never loading the entire file into memory
+- **Multer**: By default, buffers entire files in memory before processing, which can cause out-of-memory errors with large files
+
+#### Fine-grained Control
+- **Busboy**: Provides low-level access to multipart form parsing, allowing custom handling of each file chunk
+- **Multer**: Abstracts away the parsing process, making it harder to implement custom streaming logic
+
+#### Error Handling
+- **Busboy**: Offers better error handling for partial uploads and network interruptions
+- **Multer**: Less granular error handling, especially for stream-related issues
+
+#### Performance
+- **Busboy**: Significantly lower memory footprint for large files (500MB+)
+- **Multer**: Memory usage scales linearly with file size, becoming problematic for large uploads
+
+#### Integration with Processing Pipeline
+- **Busboy**: Seamlessly integrates with Node.js streams, allowing direct piping to CSV parsers and other stream processors
+- **Multer**: Requires additional steps to convert buffered files back into streams for processing
+
+For our use case of processing potentially large CSV files (up to 1 million records), Busboy's streaming approach provides the optimal balance of performance, reliability, and memory efficiency.
+
 ### Performance Configuration
 - Configurable database connection pool settings via environment variables:
   - `DB_POOL_MAX`: Maximum number of clients in the pool (default: 20)
