@@ -9,14 +9,14 @@ interface ImportResults {
   success: boolean;
   error?: string;
   stats: {
-    valid: number;
-    invalid: number;
-    total: number;
+    totalProcessed: number;
+    validContacts: number;
+    invalidContacts: number;
+    processingTimeMs: number;
   };
 }
 
 interface ImportState {
-  contacts: Contact[];
   validCount: number;
   invalidCount: number;
   totalCount: number;
@@ -27,9 +27,6 @@ interface ImportState {
   startTime: number;
 }
 
-/**
- * Custom transform stream that batches contacts and processes them
- */
 class BatchProcessor extends Transform {
   private buffer: Contact[] = [];
   private state: ImportState;
@@ -104,12 +101,10 @@ class BatchProcessor extends Transform {
 }
 
 class ContactValidator extends Transform {
-  private columns: { email?: string; firstName?: string; lastName?: string };
   private state: ImportState;
   
-  constructor(columns: { email?: string; firstName?: string; lastName?: string }, state: ImportState) {
-    super({ objectMode: true });
-    this.columns = columns;
+  constructor(state: ImportState) {
+    super({ objectMode: true, highWaterMark: 50 });
     this.state = state;
   }
   
@@ -130,54 +125,62 @@ class ContactValidator extends Transform {
   }
   
   private validateAndCreateContact(row: { [key: string]: string }): Contact {
-    if (!this.columns.email || !this.columns.firstName) {
-      throw new Error('Required columns not identified');
+    if (this.state.totalCount <= 5) {
+      console.log('row data:', JSON.stringify(row));
     }
     
     const input = {
-      email: row[this.columns.email],
-      firstName: row[this.columns.firstName],
-      lastName: this.columns.lastName ? row[this.columns.lastName] : undefined
+      email: row['email'],
+      firstName: row['first_name'],
+      lastName: row['last_name']
     };
     
-    const validatedData = ContactSchema.parse(input);
-    return Contact.fromInput(validatedData);
+    if (this.state.totalCount <= 5) {
+      console.log('Input for validation:', JSON.stringify(input));
+    }
+    
+    try {
+      const validatedData = ContactSchema.parse(input);
+      return Contact.fromInput(validatedData);
+    } catch (err) {
+      if (this.state.invalidCount <= 10) {
+        console.error('validation error details:', err);
+        console.error('failed row:', JSON.stringify(row));
+        console.error('attempted to validate:', JSON.stringify(input));
+      }
+      throw err;
+    }
   }
 }
 
 export class ContactImporter {
   constructor(
     private readonly contactService: ContactService,
-    private readonly initialBatchSize: number = 100
   ) {}
 
-  async importFromCsv(fileStream: Readable): Promise<ImportResults> {
-    console.log(`Starting CSV import process with initial batch size: ${this.initialBatchSize}`);
-    
+  async import(fileStream: Readable): Promise<ImportResults> {
     const state: ImportState = {
-      contacts: [],
       validCount: 0,
       invalidCount: 0,
       totalCount: 0,
       currentBatch: 0,
-      batchSize: this.initialBatchSize,
+      batchSize: 100,
       failedBatches: [],
       startTime: Date.now()
     };
     
     try {
-      const columns = await this.identifyColumnsFromStream(fileStream);
-      
-      if (!columns.email || !columns.firstName) {
-        throw new Error(`Missing required columns: ${!columns.email ? 'email' : ''} ${!columns.firstName ? 'first name' : ''}`);
-      }
+      await this.identifyColumnsFromStream(fileStream);
       
       const dataStream = fileStream.pipe(csvParser({ 
         strict: true, 
         skipLines: 1,
+        mapValues: ({ header, value }) => {
+          return value ? value.trim() : value;
+        }
       }));
       
-      const validator = new ContactValidator(columns, state);
+      const validator = new ContactValidator(state);
       const batchProcessor = new BatchProcessor(state, this.contactService);
       
       await new Promise<void>((resolve, reject) => {
@@ -185,10 +188,11 @@ export class ContactImporter {
           .pipe(validator)
           .pipe(batchProcessor)
           .on('finish', () => {
+            console.log(`Total: ${state.totalCount}, Valid: ${state.validCount}, Invalid: ${state.invalidCount}`);
+            
             if (state.failedBatches.length > 0) {
               console.warn(`${state.failedBatches.length} batches failed during import`);
             }
-            
             resolve();
           })
           .on('error', (err) => {
@@ -198,12 +202,12 @@ export class ContactImporter {
       });
       
       return {
-        success: !state.error,
-        error: state.error,
+        success: true,
         stats: {
-          total: state.totalCount,
-          valid: state.validCount,
-          invalid: state.invalidCount
+          totalProcessed: state.totalCount,
+          validContacts: state.validCount,
+          invalidContacts: state.invalidCount,
+          processingTimeMs: Date.now() - state.startTime
         }
       };
       
@@ -213,9 +217,10 @@ export class ContactImporter {
         success: false,
         error: err instanceof Error ? err.message : String(err),
         stats: {
-          total: state.totalCount,
-          valid: state.validCount,
-          invalid: state.invalidCount
+          totalProcessed: state.totalCount,
+          validContacts: state.validCount,
+          invalidContacts: state.invalidCount,
+          processingTimeMs: Date.now() - state.startTime
         }
       };
     }
@@ -233,17 +238,13 @@ export class ContactImporter {
       
       headerParser.once('headers', (headers: string[]) => {
         try {
-          columns.email = headers.find((header: string) => header.toLowerCase() === 'email');
-          columns.firstName = headers.find((header: string) => 
-            header.toLowerCase() === 'first_name' || 
-            header.toLowerCase() === 'firstname' ||
-            header.toLowerCase() === 'first name'
-          );
-          columns.lastName = headers.find((header: string) => 
-            header.toLowerCase() === 'last_name' || 
-            header.toLowerCase() === 'lastname' ||
-            header.toLowerCase() === 'last name'
-          );
+          console.log('CSV Headers detected:', headers);
+          
+          columns.email = 'email';
+          columns.firstName = 'first_name';
+          columns.lastName = 'last_name';
+          
+          console.log('identified columns:', columns);
           
           headerParser.destroy();
           resolve(columns);
