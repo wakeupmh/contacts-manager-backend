@@ -29,11 +29,11 @@ interface ImportState {
 export class ContactImporter {
   constructor(
     private readonly contactService: ContactService,
-    private readonly batchSize: number = 500
+    private readonly batchSize: number = 200
   ) {}
 
   async importFromCsv(fileStream: Readable): Promise<ImportResults> {
-    console.log(`Starting CSV import process with batch size: ${this.batchSize}`);
+    console.log(`starting CSV import process with batch size: ${this.batchSize}`);
     
     return new Promise((resolve) => {
       const state: ImportState = {

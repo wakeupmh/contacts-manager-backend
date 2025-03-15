@@ -34,7 +34,7 @@ export class PostgresContactRepository implements ContactRepository {
 
     let retries = 0;
     const maxRetries = 3;
-    const retryDelay = 2000; // 2 seconds
+    const retryDelay = 5000; // 5 seconds
 
     while (retries <= maxRetries) {
       let client;
@@ -95,7 +95,7 @@ export class PostgresContactRepository implements ContactRepository {
 
   private async handleTransactionError(client: any, error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.log(`Error in transaction, rolling back: ${errorMessage}`);
+    console.log(`error in transaction, rolling back: ${errorMessage}`);
 
     try {
       await client.query("ROLLBACK");
@@ -230,14 +230,14 @@ export class PostgresContactRepository implements ContactRepository {
 
     if (rejected.length > 0) {
       console.warn(
-        `Batch ${batchNumber}/${totalBatches}: ${rejected.length} operations failed out of ${batchContacts.length}`
+        `batch ${batchNumber}/${totalBatches}: ${rejected.length} operations failed out of ${batchContacts.length}`
       );
 
       const maxErrorsToLog = Math.min(3, rejected.length);
       for (let i = 0; i < maxErrorsToLog; i++) {
         const error = (rejected[i] as PromiseRejectedResult).reason;
         console.error(
-          `Error sample ${i + 1}/${maxErrorsToLog}: ${
+          `error sample ${i + 1}/${maxErrorsToLog}: ${
             error instanceof Error ? error.message : String(error)
           }`
         );
