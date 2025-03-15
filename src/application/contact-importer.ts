@@ -60,12 +60,12 @@ export class ContactImporter {
           }
 
           try {
-            console.log(`validating row ${totalCount}`);
             const validatedData = ContactSchema.parse({
               email: row[emailColumn],
               firstName: row[firstNameColumn],
               lastName: lastNameColumn ? row[lastNameColumn] : null
             });
+            console.log(`validated row ${totalCount}`, validatedData);
 
             const contact = Contact.fromInput(validatedData);
             contacts.push(contact);
