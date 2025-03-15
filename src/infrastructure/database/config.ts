@@ -14,10 +14,10 @@ export const createDatabasePool = (): Pool => {
   const pool = new Pool({
     connectionString,
     ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-    max: parseInt(process.env.DB_POOL_MAX || '20'),
+    max: parseInt(process.env.DB_POOL_MAX || '30'), 
     idleTimeoutMillis: parseInt(process.env.DB_POOL_IDLE_TIMEOUT || '30000'),
-    connectionTimeoutMillis: parseInt(process.env.DB_POOL_CONNECTION_TIMEOUT || '5000'),
-    statement_timeout: parseInt(process.env.DB_STATEMENT_TIMEOUT || '180000') // 3 minutes
+    connectionTimeoutMillis: parseInt(process.env.DB_POOL_CONNECTION_TIMEOUT || '10000'), 
+    statement_timeout: parseInt(process.env.DB_STATEMENT_TIMEOUT || '300000') 
   });
   
   pool.on('connect', () => {
