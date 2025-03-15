@@ -82,7 +82,7 @@ export class ContactController {
       }, 10000);
       
       try {
-        const result = await this.contactImporter.import(file);
+        const result = await this.contactImporter.importFromCsv(file);
         clearTimeout(processingTimeout);
         
         if (!result.success) {

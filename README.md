@@ -99,48 +99,71 @@ The self-ping mechanism can be configured using the following environment variab
 This application is optimized to efficiently handle large CSV files with up to 1 million records. The following optimizations have been implemented:
 
 ### Batch Processing
-- CSV data is processed in configurable batches (default: 1000 records per batch)
-- Automatic batch size adjustment based on database performance
-- Dynamic retry mechanism for handling timeouts during import
-- Detailed progress reporting for monitoring large imports
+- CSV data is processed in configurable batches (default: 1000 records)
+- Each batch is saved to the database immediately, minimizing memory usage
+- Progress tracking for large imports with detailed statistics
 
-### PostgreSQL Parameter Optimization
-- The system uses prepared statements to improve SQL performance
-- PostgreSQL parameter limits are carefully managed to prevent query size issues
-- Maximum parameters per query are set to 32767 (half of PostgreSQL's 65535 limit) for stability
-- Batch sizes are automatically adjusted based on retry attempts using an exponential backoff strategy
+### Database Optimizations
+- Bulk insert operations using parameterized queries
+- Intelligent batching to stay within PostgreSQL's parameter limits
+- Optimized connection pool settings for large-scale operations
+- Transaction management to ensure data consistency
 
-### Error Handling
-- Graceful handling of validation errors during CSV processing
-- Resilient database operations using Promise.allSettled for partial batch success
-- Intelligent retry logic for connection timeouts and transient errors
-- Detailed error reporting with meaningful error messages
+### HTTP Request Handling
+- Extended request timeout (10 minutes) for large file processing
+- Increased file size limits (up to 500MB)
+- Comprehensive error handling and progress reporting
+- Memory-efficient stream processing
+
+### Why Busboy Instead of Multer
+
+This application uses Busboy for file upload handling instead of the more commonly used Multer middleware. Here's why Busboy is superior for handling large files:
+
+#### Memory Efficiency
+- **Busboy**: Processes files as streams, never loading the entire file into memory
+- **Multer**: By default, buffers entire files in memory before processing, which can cause out-of-memory errors with large files
+
+#### Fine-grained Control
+- **Busboy**: Provides low-level access to multipart form parsing, allowing custom handling of each file chunk
+- **Multer**: Abstracts away the parsing process, making it harder to implement custom streaming logic
+
+#### Error Handling
+- **Busboy**: Offers better error handling for partial uploads and network interruptions
+- **Multer**: Less granular error handling, especially for stream-related issues
+
+#### Performance
+- **Busboy**: Significantly lower memory footprint for large files (500MB+)
+- **Multer**: Memory usage scales linearly with file size, becoming problematic for large uploads
+
+For our use case of processing potentially large CSV files (up to 1 million records), Busboy's streaming approach provides the optimal balance of performance, reliability, and memory efficiency.
 
 ### Performance Configuration
 - Configurable database connection pool settings via environment variables:
-  - `DB_POOL_MAX`: Maximum number of clients in the pool (default: 30)
+  - `DB_POOL_MAX`: Maximum number of clients in the pool (default: 20)
   - `DB_POOL_IDLE_TIMEOUT`: Client idle timeout in milliseconds (default: 30000)
-  - `DB_POOL_CONNECTION_TIMEOUT`: Connection timeout in milliseconds (default: 10000)
-  - `DB_STATEMENT_TIMEOUT`: SQL statement timeout in milliseconds (default: 300000)
+  - `DB_POOL_CONNECTION_TIMEOUT`: Connection timeout in milliseconds (default: 5000)
+  - `DB_STATEMENT_TIMEOUT`: SQL statement timeout in milliseconds (default: 180000)
+- Node.js memory optimization via `NODE_OPTIONS="--max-old-space-size=4096"`
 
-### Production Considerations
-When deploying to production with large datasets:
+### Docker Configuration
+The included Dockerfile is configured with optimized settings for handling large datasets:
+```
+# Set Node to use maximum memory
+ENV NODE_OPTIONS="--max-old-space-size=4096"
 
-1. **Database tuning**: Adjust PostgreSQL settings based on available resources:
-   ```
-   # Example PostgreSQL configuration for large imports
-   max_connections = 100
-   shared_buffers = 256MB
-   work_mem = 16MB
-   maintenance_work_mem = 256MB
-   ```
+# Optimize environment variables for large datasets
+ENV DB_POOL_MAX=20
+ENV DB_POOL_IDLE_TIMEOUT=30000
+ENV DB_POOL_CONNECTION_TIMEOUT=5000
+ENV DB_STATEMENT_TIMEOUT=180000
+```
 
-2. **Memory allocation**: Ensure sufficient memory is available for Node.js:
-   ```
-   NODE_OPTIONS="--max-old-space-size=4096"
-   ```
-
-3. **Monitoring**: Use the detailed logging provided by the application to monitor import progress and identify bottlenecks
+### Best Practices for Large Imports
+- Ensure your CSV file has clean, consistent data
+- Make sure your database has sufficient resources
+- For extremely large files (>1M records), consider using a dedicated database instance
+- Monitor system resources during import operations
+- Use the provided statistics in the API response to track import progress
 
 ## Performance Considerations
 
@@ -216,38 +239,3 @@ The application follows these security best practices:
 Security-related environment variables:
 - `NODE_ENV`: Set to 'production' in production environments to enable additional security features
 - `DB_STATEMENT_TIMEOUT`: Limits the duration of database queries to prevent DoS attacks
-
-## Why Busboy Instead of Multer
-
-This application uses Busboy for file upload handling instead of the more commonly used Multer middleware. Here's why Busboy is superior for handling large files:
-
-#### Memory Efficiency
-- **Busboy**: Processes files as streams, never loading the entire file into memory
-- **Multer**: By default, buffers entire files in memory before processing, which can cause out-of-memory errors with large files
-
-#### Fine-grained Control
-- **Busboy**: Provides low-level access to multipart form parsing, allowing custom handling of each file chunk
-- **Multer**: Abstracts away the parsing process, making it harder to implement custom streaming logic
-
-#### Error Handling
-- **Busboy**: Offers better error handling for partial uploads and network interruptions
-- **Multer**: Less granular error handling, especially for stream-related issues
-
-#### Performance
-- **Busboy**: Significantly lower memory footprint for large files (500MB+)
-- **Multer**: Memory usage scales linearly with file size, becoming problematic for large uploads
-
-For our use case of processing potentially large CSV files (up to 1 million records), Busboy's streaming approach provides the optimal balance of performance, reliability, and memory efficiency.
-
-### Docker Configuration
-The included Dockerfile is configured with optimized settings for handling large datasets:
-```
-# Set Node to use maximum memory
-ENV NODE_OPTIONS="--max-old-space-size=4096"
-
-# Optimize environment variables for large datasets
-ENV DB_POOL_MAX=20
-ENV DB_POOL_IDLE_TIMEOUT=30000
-ENV DB_POOL_CONNECTION_TIMEOUT=5000
-ENV DB_STATEMENT_TIMEOUT=180000
-```

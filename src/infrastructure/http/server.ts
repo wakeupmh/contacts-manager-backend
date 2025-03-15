@@ -18,8 +18,7 @@ export const createServer = (contactController: ContactController): Express => {
   app.use(cors());
   
   app.use((req, res, next) => {
-    const FIFTEEN_MINUTES = 15 * 60 * 1000; 
-    res.setTimeout(FIFTEEN_MINUTES, () => {
+    res.setTimeout(10 * 60 * 1000, () => {
       console.log('Request has timed out.');
       res.status(408).send('Request Timeout');
     });
