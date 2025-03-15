@@ -1,273 +1,189 @@
 import { Readable } from 'stream';
 import csvParser from 'csv-parser';
-import { Transform } from 'stream';
 import { Contact } from '../domain/entities/contact';
 import { ContactService } from '../domain/services/contact-service';
 import { ContactSchema } from '../domain/validation/contact-schema';
-
-interface ImportResults {
-  success: boolean;
-  error?: string;
-  stats: {
-    totalProcessed: number;
-    validContacts: number;
-    invalidContacts: number;
-    processingTimeMs: number;
-  };
-}
-
-interface ImportState {
-  validCount: number;
-  invalidCount: number;
-  totalCount: number;
-  currentBatch: number;
-  batchSize: number;
-  failedBatches: number[];
-  error?: string;
-  startTime: number;
-}
-
-class BatchProcessor extends Transform {
-  private buffer: Contact[] = [];
-  private state: ImportState;
-  private contactService: ContactService;
-  
-  constructor(state: ImportState, contactService: ContactService) {
-    super({ objectMode: true, highWaterMark: 50 });
-    this.state = state;
-    this.contactService = contactService;
-  }
-  
-  _transform(contact: Contact, encoding: string, callback: Function) {
-    this.buffer.push(contact);
-    this.state.validCount++;
-    this.state.totalCount++;
-    
-    if (this.buffer.length >= this.state.batchSize) {
-      console.log(`buffer reached batch size (${this.state.batchSize}), processing batch...`);
-      this.processBatch()
-        .then(() => callback())
-        .catch(err => callback(err));
-    } else {
-      callback();
-    }
-  }
-  
-  _flush(callback: Function) {
-    if (this.buffer.length > 0) {
-      console.log(`flushing remaining ${this.buffer.length} contacts in buffer`);
-      this.processBatch()
-        .then(() => callback())
-        .catch(err => callback(err));
-    } else {
-      console.log('no contacts left in buffer to flush');
-      callback();
-    }
-  }
-  
-  private async processBatch(): Promise<void> {
-    try {
-      const batch = [...this.buffer];
-      this.buffer = [];
-      
-      this.state.currentBatch++;
-      const batchNumber = this.state.currentBatch;
-      
-      if (batchNumber % 5 === 0) {
-        const elapsedSeconds = (Date.now() - this.state.startTime) / 1000;
-        const ratePerSecond = Math.round(this.state.totalCount / elapsedSeconds);
-        console.log(`batch ${batchNumber}: saving ${batch.length} contacts (total: ${this.state.totalCount}, rate: ${ratePerSecond}/sec)`);
-      }
-      
-      await this.contactService.saveContacts(batch);
-      
-      if (batchNumber % 20 === 0 && this.state.batchSize < 500) {
-        this.state.batchSize = Math.min(500, Math.floor(this.state.batchSize * 1.1));
-        console.log(`adjusted batch size to ${this.state.batchSize}`);
-      }
-    } catch (err) {
-      console.error(`error in batch ${this.state.currentBatch}:`, err);
-      this.state.failedBatches.push(this.state.currentBatch);
-      
-      if (this.state.batchSize > 50) {
-        this.state.batchSize = Math.max(50, Math.floor(this.state.batchSize * 0.7));
-        console.log(`reduced batch size to ${this.state.batchSize} due to error`);
-      }
-      
-      if (err instanceof Error && 
-          !err.message.includes('timeout') && 
-          !err.message.includes('network')) {
-        this.state.error = err.message;
-      }
-    }
-  }
-}
-
-class ContactValidator extends Transform {
-  private state: ImportState;
-  
-  constructor(state: ImportState) {
-    super({ objectMode: true, highWaterMark: 50 });
-    this.state = state;
-  }
-  
-  _transform(row: { [key: string]: string }, encoding: string, callback: Function) {
-    try {
-      if (this.state.totalCount % 1000 === 0) {
-        console.log(`processing row #${this.state.totalCount}:`, JSON.stringify(row));
-      }
-      
-      const contact = this.validateAndCreateContact(row);
-      
-      if (this.state.validCount % 1000 === 0) {
-        console.log(`successfully validated ${this.state.validCount} contacts so far`);
-      }
-      
-      callback(null, contact); 
-    } catch (err) {
-      this.state.invalidCount++;
-      this.state.totalCount++;
-      
-      if (this.state.invalidCount % 100 === 0) {
-        console.warn(`${this.state.invalidCount} validation errors out of ${this.state.totalCount} total rows`);
-      }
-      
-      callback();
-    }
-  }
-  
-  private validateAndCreateContact(row: { [key: string]: string }): Contact {
-    if (this.state.totalCount <= 5) {
-      console.log('row data:', JSON.stringify(row));
-    }
-    
-    const input = {
-      email: row['email'],
-      firstName: row['first_name'],
-      lastName: row['last_name']
-    };
-    
-    try {
-      const validatedData = ContactSchema.parse(input);
-      return Contact.fromInput(validatedData);
-    } catch (err) {
-      if (this.state.invalidCount <= 10) {
-        console.error('validation error details:', err);
-        console.error('failed row:', JSON.stringify(row));
-        console.error('attempted to validate:', JSON.stringify(input));
-      }
-      throw err;
-    }
-  }
-}
+import { z } from 'zod';
 
 export class ContactImporter {
   constructor(
-    private readonly contactService: ContactService
+    private readonly contactService: ContactService,
+    private readonly batchSize: number = 1000
   ) {}
 
-  async importFromCsv(fileStream: Readable): Promise<ImportResults> {
-    const state: ImportState = {
-      validCount: 0,
-      invalidCount: 0,
-      totalCount: 0,
-      currentBatch: 0,
-      batchSize: 100,
-      failedBatches: [],
-      startTime: Date.now()
-    };
-    
-    try {
-      await this.identifyColumnsFromStream(fileStream);
-      const dataStream = fileStream.pipe(csvParser({ 
-        strict: true, 
-        skipLines: 1,
-        mapValues: ({ header, value }) => {
-          if (state.totalCount < 5) {
-            console.log(`CSV value for ${header}: "${value}"`);
-          }
-          return value ? value.trim() : value;
-        }
-      }));
-      
-      const validator = new ContactValidator(state);
-      const batchProcessor = new BatchProcessor(state, this.contactService);
-      
-      await new Promise<void>((resolve, reject) => {
-        dataStream
-          .pipe(validator)
-          .pipe(batchProcessor)
-          .on('finish', () => {
-            console.log(`Total: ${state.totalCount}, Valid: ${state.validCount}, Invalid: ${state.invalidCount}`);
-            
-            if (state.failedBatches.length > 0) {
-              console.warn(`${state.failedBatches.length} batches failed during import`);
-            }
-            resolve();
-          })
-          .on('error', (err) => {
-            console.error('stream processing error:', err);
-            reject(err);
-          });
-      });
-      
-      return {
-        success: true,
-        stats: {
-          totalProcessed: state.totalCount,
-          validContacts: state.validCount,
-          invalidContacts: state.invalidCount,
-          processingTimeMs: Date.now() - state.startTime
-        }
-      };
-      
-    } catch (err) {
-      console.error('error during CSV import:', err);
-      return {
-        success: false,
-        error: err instanceof Error ? err.message : String(err),
-        stats: {
-          totalProcessed: state.totalCount,
-          validContacts: state.validCount,
-          invalidContacts: state.invalidCount,
-          processingTimeMs: Date.now() - state.startTime
-        }
-      };
+  async importFromCsv(fileStream: Readable): Promise<{ 
+    success: boolean; 
+    error?: string; 
+    stats?: { 
+      valid: number; 
+      invalid: number; 
+      total: number;
     }
-  }
+  }> {
+    console.log(`starting csv import process with batch size: ${this.batchSize}`);
+    return new Promise((resolve) => {
+      let emailColumn: string | undefined;
+      let firstNameColumn: string | undefined;
+      let lastNameColumn: string | undefined;
+      let contacts: Contact[] = [];
+      let headersChecked = false;
+      let error: string | undefined;
+      let invalidCount = 0;
+      let validCount = 0;
+      let totalCount = 0;
+      let currentBatch = 0;
 
-  private async identifyColumnsFromStream(fileStream: Readable): Promise<{ email?: string; firstName?: string; lastName?: string }> {
-    return new Promise((resolve, reject) => {
-      const columns = {
-        email: undefined as string | undefined,
-        firstName: undefined as string | undefined,
-        lastName: undefined as string | undefined
-      };
-      
-      const headerParser = csvParser();
-      
-      headerParser.once('headers', (headers: string[]) => {
-        try {
-          console.log('CSV Headers detected:', headers);
+      fileStream
+        .pipe(csvParser())
+        .on('headers', (headers: string[]) => {
+          emailColumn = headers.find((header: string) => header.toLowerCase() === 'email');
+          firstNameColumn = headers.find((header: string) => header.toLowerCase() === 'first_name');
+          lastNameColumn = headers.find((header: string) => header.toLowerCase() === 'last_name');
+
+          console.log(`identified columns - email: ${emailColumn}, first name: ${firstNameColumn}, last name: ${lastNameColumn}`);
+
+          if (!emailColumn || !firstNameColumn) {
+            error = 'CSV must contain email and first name columns';
+            console.error(`missing required columns: ${!emailColumn ? 'email' : ''} ${!firstNameColumn ? 'first name' : ''}`);
+            fileStream.resume();
+            return;
+          }
+          headersChecked = true;
+        })
+        .on('data', async (row: { [key: string]: string }) => {
+          if (!headersChecked || !emailColumn || !firstNameColumn) return;
           
-          columns.email = 'email';
-          columns.firstName = 'first_name';
-          columns.lastName = 'last_name';
+          totalCount++;
           
-          console.log('identified columns:', columns);
+          if (totalCount % this.batchSize === 0) {
+            console.log(`processing row ${totalCount}`);
+          }
+
+          try {
+            const validatedData = ContactSchema.parse({
+              email: row[emailColumn],
+              firstName: row[firstNameColumn],
+              lastName: lastNameColumn ? row[lastNameColumn] : null
+            });
+
+            const contact = Contact.fromInput(validatedData);
+            contacts.push(contact);
+            validCount++;
+            
+            if (contacts.length >= this.batchSize) {
+              fileStream.pause();
+              
+              try {
+                currentBatch++;
+                console.log(`saving batch ${currentBatch} with ${contacts.length} contacts (processed ${totalCount} rows so far)`);
+                await this.contactService.saveContacts(contacts);
+                console.log(`batch ${currentBatch} saved successfully`);
+              } catch (err) {
+                console.error(`error saving batch ${currentBatch}: ${err instanceof Error ? err.message : String(err)}`);
+                error = err instanceof Error ? err.message : 'Unknown error during import';
+              }
+              
+              contacts = [];
+              
+              fileStream.resume();
+            }
+          } catch (err) {
+            invalidCount++;
+            
+            if (err instanceof z.ZodError) {
+              const errorMessages = err.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
+              console.error(`validation error in row ${totalCount} with data: ${JSON.stringify(row)}`);
+              console.error(`error details: ${errorMessages}`);
+            } else {
+              console.error(`error in row ${totalCount} with data: ${JSON.stringify(row)}`);
+              console.error(`error details: ${err instanceof Error ? err.message : String(err)}`);
+            }
+            
+            if (invalidCount % this.batchSize === 0) {
+              if (err instanceof z.ZodError) {
+                const errorMessages = err.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
+                console.error(`${invalidCount} validation errors so far. Last error in row ${totalCount}: ${errorMessages}`);
+              } else {
+                console.error(`${invalidCount} errors so far. Last error in row ${totalCount}: ${err instanceof Error ? err.message : String(err)}`);
+              }
+            }
+          }
+        })
+        .on('end', async () => {
+          console.log(`csv parsing complete => total: ${totalCount}, valid: ${validCount}, invalid: ${invalidCount}`);
           
-          headerParser.destroy();
-          resolve(columns);
-        } catch (err) {
-          reject(err);
-        }
-      });
-      
-      headerParser.once('error', (err) => {
-        reject(err);
-      });
-      
-      fileStream.pipe(headerParser);
+          if (error) {
+            console.log(`import failed due to error: ${error}`);
+            resolve({ 
+              success: false, 
+              error,
+              stats: {
+                valid: validCount,
+                invalid: invalidCount,
+                total: totalCount
+              }
+            });
+            return;
+          }
+
+          if (contacts.length > 0) {
+            try {
+              currentBatch++;
+              console.log(`saving final batch ${currentBatch} with ${contacts.length} contacts`);
+              await this.contactService.saveContacts(contacts);
+              console.log(`final batch saved successfully`);
+            } catch (err) {
+              console.log(`error saving final batch: ${err instanceof Error ? err.message : String(err)}`);
+              error = err instanceof Error ? err.message : 'Unknown error during import';
+              resolve({ 
+                success: false, 
+                error,
+                stats: {
+                  valid: validCount,
+                  invalid: invalidCount,
+                  total: totalCount
+                }
+              });
+              return;
+            }
+          }
+
+          if (validCount === 0) {
+            console.error(`import failed: no valid contacts found`);
+            resolve({ 
+              success: false, 
+              error: 'No valid contacts found in CSV',
+              stats: {
+                valid: 0,
+                invalid: invalidCount,
+                total: totalCount
+              }
+            });
+            return;
+          }
+
+          console.log(`import completed successfully`);
+          resolve({ 
+            success: true, 
+            stats: {
+              valid: validCount,
+              invalid: invalidCount,
+              total: totalCount
+            }
+          });
+        })
+        .on('error', (err: unknown) => {
+          console.log(`csv parsing error: ${err instanceof Error ? err.message : String(err)}`);
+          resolve({ 
+            success: false, 
+            error: err instanceof Error ? err.message : String(err),
+            stats: {
+              valid: validCount,
+              invalid: invalidCount,
+              total: totalCount
+            }
+          });
+        });
     });
   }
 }

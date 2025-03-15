@@ -32,85 +32,54 @@ export class PostgresContactRepository implements ContactRepository {
       return;
     }
 
-    const SUPABASE_BATCH_SIZE = 500; 
-    const MAX_RETRIES = 5;
-    const RETRY_DELAY_MS = 3000;
-    
-    for (let startIdx = 0; startIdx < contacts.length; startIdx += SUPABASE_BATCH_SIZE) {
-      const batchContacts = contacts.slice(startIdx, startIdx + SUPABASE_BATCH_SIZE);
-      const batchNumber = Math.floor(startIdx / SUPABASE_BATCH_SIZE) + 1;
-      const totalBatches = Math.ceil(contacts.length / SUPABASE_BATCH_SIZE);
-      
-      console.log(`processing batch ${batchNumber}/${totalBatches} with ${batchContacts.length} contacts`);
-      
-      let retryCount = 0;
-      let success = false;
-      
-      while (!success && retryCount <= MAX_RETRIES) {
-        try {
-          if (retryCount > 0) {
-            console.log(`retrying attempt ${retryCount}/${MAX_RETRIES} for batch ${batchNumber}`);
-            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * Math.pow(2, retryCount - 1)));
-          }
-          
-          await this.saveBatch(batchContacts);
-          success = true;
-          console.log(`batch ${batchNumber}/${totalBatches} completed successfully`);
-          
-        } catch (error) {
-          retryCount++;
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          console.error(`error in batch ${batchNumber}, attempt ${retryCount}: ${errorMessage}`);
-          
-          if (retryCount > MAX_RETRIES) {
-            console.error(`max retries exceeded for batch ${batchNumber}, giving up`);
-            throw error;
-          }
-        }
-      }
-    }
-    
-    console.log(`all ${contacts.length} contacts saved successfully`);
-  }
-  
-  private async saveBatch(contacts: Contact[]): Promise<void> {
     const client = await this.pool.connect();
     
     try {
-      console.log(`Beginning transaction for batch of ${contacts.length} contacts`);
+      console.log(`beginning transaction`);
       await client.query('BEGIN');
       
-      const placeholders = contacts.map((_, idx) => {
-        const offset = idx * 3; // 3 parameters per contact
-        return `($${offset + 1}, $${offset + 2}, $${offset + 3})`;
-      }).join(', ');
+      const MAX_PARAMS = 65535; // parameters in a single query due to PostgreSQL limit
+      const PARAMS_PER_CONTACT = 3;
+      const MAX_CONTACTS_PER_INSERT = Math.floor(MAX_PARAMS / PARAMS_PER_CONTACT);
       
-      const values = contacts.flatMap(contact => [
-        contact.email,
-        contact.firstName,
-        contact.lastName
-      ]);
+      for (let i = 0; i < contacts.length; i += MAX_CONTACTS_PER_INSERT) {
+        const batch = contacts.slice(i, i + MAX_CONTACTS_PER_INSERT);
+        console.log(`processing batch of ${batch.length} contacts, starting at index ${i}`);
+        
+        // placeholders for bulk insert: ($1, $2, $3), ($4, $5, $6), ...
+        const placeholders = batch.map((_, idx) => {
+          const offset = idx * PARAMS_PER_CONTACT;
+          return `($${offset + 1}, $${offset + 2}, $${offset + 3})`;
+        }).join(', ');
+        
+        const values = batch.flatMap(contact => [
+          contact.email,
+          contact.firstName,
+          contact.lastName
+        ]);
+        
+        const query = `
+          INSERT INTO contacts (email, first_name, last_name)
+          VALUES ${placeholders}
+          ON CONFLICT (email) DO UPDATE
+          SET first_name = EXCLUDED.first_name, 
+              last_name = EXCLUDED.last_name
+        `;
+        
+        console.log(`executing batch insert with ${batch.length} contacts`);
+        await client.query(query, values);
+        console.log(`batch insert successful`);
+      }
       
-      const query = `
-        INSERT INTO contacts (email, first_name, last_name)
-        VALUES ${placeholders}
-        ON CONFLICT (email) DO UPDATE
-        SET first_name = EXCLUDED.first_name, 
-            last_name = EXCLUDED.last_name
-      `;
-      
-      console.log(`Executing batch insert with ${contacts.length} contacts`);
-      await client.query(query, values);
-      
-      console.log(`Committing transaction`);
+      console.log(`committing transaction`);
       await client.query('COMMIT');
-      
+      console.log(`transaction committed successfully`);
     } catch (error) {
-      console.log(`Error in transaction, rolling back: ${error instanceof Error ? error.message : String(error)}`);
+      console.log(`error in transaction, rolling back: ${error instanceof Error ? error.message : String(error)}`);
       await client.query('ROLLBACK');
       throw error;
     } finally {
-      console.log(`Releasing client`);
+      console.log(`releasing client`);
       client.release();
     }
   }
