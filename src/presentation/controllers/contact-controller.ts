@@ -88,18 +88,26 @@ export class ContactController {
         if (!result.success) {
           console.log(`import failed: ${result.error}`);
           res.status(400).json({ 
-            error: result.error,
+            error: result.error || 'Import failed',
             stats: result.stats
           });
           return;
         }
         
         const processingTime = ((Date.now() - uploadStartTime) / 1000).toFixed(2);
-        console.log(`import successful: ${JSON.stringify(result.stats)}, processing time: ${processingTime}s`);
+        const contactsPerSecond = Math.round(result.stats.validContacts / (Date.now() - uploadStartTime) * 1000);
+        
+        console.log(`import successful: processed ${result.stats.totalProcessed} contacts in ${processingTime}s (${contactsPerSecond} contacts/sec)`);
+        
         res.status(200).json({ 
           message: 'Contacts imported successfully',
-          stats: result.stats,
-          processing_time: `${processingTime} seconds`
+          stats: {
+            processed: result.stats.totalProcessed,
+            valid: result.stats.validContacts,
+            invalid: result.stats.invalidContacts,
+            processingTimeSeconds: parseFloat(processingTime),
+            contactsPerSecond
+          }
         });
       } catch (error) {
         clearTimeout(processingTimeout);
