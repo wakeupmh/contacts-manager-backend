@@ -61,6 +61,30 @@ For development:
 npm run dev
 ```
 
+## Self-Ping Mechanism
+
+The application includes a self-ping mechanism that helps keep the service active by making periodic requests to its own `/health` endpoint. This is particularly useful for preventing the application from going idle on platforms with inactivity timeouts.
+
+### Configuration
+
+The self-ping mechanism can be configured using the following environment variables:
+
+- `APP_URL`: The URL of the application (default: `http://localhost:3000`)
+- `PING_INTERVAL_MINUTES`: How often to ping the application in minutes (default: `5`)
+
+Example configuration in `.env` file:
+```
+APP_URL=https://your-app-domain.com
+PING_INTERVAL_MINUTES=10
+```
+
+### How It Works
+
+1. When the application starts, it initializes the self-ping service
+2. The service makes HTTP requests to the application's `/health` endpoint at regular intervals
+3. These requests help keep the application active and prevent it from being terminated due to inactivity
+4. The service logs the results of each ping for monitoring purposes
+
 ## API Endpoints
 
 - `GET /contacts`: Get paginated contacts
