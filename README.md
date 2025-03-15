@@ -31,7 +31,7 @@ The application follows a DDD architecture with the following layers:
 ## Getting Started
 
 ### Prerequisites
-- Node.js (v14+)
+- Node.js (v20+)
 - PostgreSQL database
 
 ### Installation
@@ -63,7 +63,8 @@ npm run dev
 
 ## Self-Ping Mechanism
 
-The application includes a self-ping mechanism that helps keep the service active by making periodic requests to its own `/health` endpoint. This is particularly useful for preventing the application from going idle on platforms with inactivity timeouts.
+The application includes a self-ping mechanism that helps keep the service active by making periodic requests to its own `/health` endpoint. 
+This is particularly useful for preventing the application from going idle on Render as it has a inactivity timeouts.
 
 ### Configuration
 
@@ -72,15 +73,10 @@ The self-ping mechanism can be configured using the following environment variab
 - `APP_URL`: The URL of the application (default: `http://localhost:3000`)
 - `PING_INTERVAL_MINUTES`: How often to ping the application in minutes (default: `5`)
 
-Example configuration in `.env` file:
-```
-APP_URL=https://your-app-domain.com
-PING_INTERVAL_MINUTES=10
-```
 
 ### How It Works
 
-1. When the application starts, it initializes the self-ping service
+1. When the application starts, it initializes the self-ping service, because Render free tier has a spin down policy, so it's a lil hack to achieve the availability.
 2. The service makes HTTP requests to the application's `/health` endpoint at regular intervals
 3. These requests help keep the application active and prevent it from being terminated due to inactivity
 4. The service logs the results of each ping for monitoring purposes
@@ -138,10 +134,6 @@ This application uses Busboy for file upload handling instead of the more common
 #### Performance
 - **Busboy**: Significantly lower memory footprint for large files (500MB+)
 - **Multer**: Memory usage scales linearly with file size, becoming problematic for large uploads
-
-#### Integration with Processing Pipeline
-- **Busboy**: Seamlessly integrates with Node.js streams, allowing direct piping to CSV parsers and other stream processors
-- **Multer**: Requires additional steps to convert buffered files back into streams for processing
 
 For our use case of processing potentially large CSV files (up to 1 million records), Busboy's streaming approach provides the optimal balance of performance, reliability, and memory efficiency.
 

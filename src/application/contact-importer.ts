@@ -65,7 +65,6 @@ export class ContactImporter {
               firstName: row[firstNameColumn],
               lastName: lastNameColumn ? row[lastNameColumn] : null
             });
-            console.log(`validated row ${totalCount}`, validatedData);
 
             const contact = Contact.fromInput(validatedData);
             contacts.push(contact);
@@ -93,11 +92,11 @@ export class ContactImporter {
             
             if (err instanceof z.ZodError) {
               const errorMessages = err.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
-              console.error(`Validation error in row ${totalCount} with data: ${JSON.stringify(row)}`);
-              console.error(`Error details: ${errorMessages}`);
+              console.error(`validation error in row ${totalCount} with data: ${JSON.stringify(row)}`);
+              console.error(`error details: ${errorMessages}`);
             } else {
-              console.error(`Error in row ${totalCount} with data: ${JSON.stringify(row)}`);
-              console.error(`Error details: ${err instanceof Error ? err.message : String(err)}`);
+              console.error(`error in row ${totalCount} with data: ${JSON.stringify(row)}`);
+              console.error(`error details: ${err instanceof Error ? err.message : String(err)}`);
             }
             
             if (invalidCount % this.batchSize === 0) {
