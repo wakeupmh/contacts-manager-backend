@@ -91,12 +91,21 @@ export class ContactImporter {
           } catch (err) {
             invalidCount++;
             
+            if (err instanceof z.ZodError) {
+              const errorMessages = err.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
+              console.error(`Validation error in row ${totalCount} with data: ${JSON.stringify(row)}`);
+              console.error(`Error details: ${errorMessages}`);
+            } else {
+              console.error(`Error in row ${totalCount} with data: ${JSON.stringify(row)}`);
+              console.error(`Error details: ${err instanceof Error ? err.message : String(err)}`);
+            }
+            
             if (invalidCount % this.batchSize === 0) {
               if (err instanceof z.ZodError) {
                 const errorMessages = err.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
-                console.error(`${invalidCount} validation errors in row ${totalCount}: ${errorMessages}`);
+                console.error(`${invalidCount} validation errors so far. Last error in row ${totalCount}: ${errorMessages}`);
               } else {
-                console.error(`${invalidCount} errors in row ${totalCount}: ${err instanceof Error ? err.message : String(err)}`);
+                console.error(`${invalidCount} errors so far. Last error in row ${totalCount}: ${err instanceof Error ? err.message : String(err)}`);
               }
             }
           }
