@@ -29,7 +29,7 @@ interface ImportState {
 export class ContactImporter {
   constructor(
     private readonly contactService: ContactService,
-    private readonly batchSize: number = 1000
+    private readonly batchSize: number = 500
   ) {}
 
   async importFromCsv(fileStream: Readable): Promise<ImportResults> {
@@ -102,12 +102,12 @@ export class ContactImporter {
     columns.firstName = headers.find((header: string) => header.toLowerCase() === 'first_name');
     columns.lastName = headers.find((header: string) => header.toLowerCase() === 'last_name');
     
-    console.log(`Identified columns - email: ${columns.email}, first name: ${columns.firstName}, last name: ${columns.lastName}`);
+    console.log(`identifying columns - email: ${columns.email}, first name: ${columns.firstName}, last name: ${columns.lastName}`);
   }
   
   private logProgress(totalCount: number, batchSize: number): void {
     if (totalCount % (batchSize * 5) === 0) {
-      console.log(`Processing progress: ${totalCount} rows processed so far`);
+      console.log(`processing progress: ${totalCount} rows processed so far`);
     }
   }
   
@@ -137,16 +137,15 @@ export class ContactImporter {
       await this.contactService.saveContacts(state.contacts);
       const duration = Date.now() - startTime;
       
-      console.log(`Batch ${state.currentBatch} saved successfully in ${duration}ms`);
+      console.log(`batch ${state.currentBatch} saved successfully in ${duration}ms`);
     } catch (err) {
       console.error(`Error saving batch ${state.currentBatch}: ${err instanceof Error ? err.message : String(err)}`);
       
       if (err instanceof Error && err.message.includes('timeout')) {
         state.failedBatches.push(state.currentBatch);
         
-        // Adjust batch size dynamically based on timeouts
         state.batchSize = Math.max(100, Math.floor(state.batchSize / 2));
-        console.log(`Reduced batch size to ${state.batchSize} due to timeout`);
+        console.log(`reduced batch size to ${state.batchSize} due to timeout`);
       } else {
         state.error = err instanceof Error ? err.message : 'Unknown error during import';
       }
@@ -163,13 +162,13 @@ export class ContactImporter {
       const errorMessages = err.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
       
       if (state.invalidCount <= 10 || state.invalidCount % 1000 === 0) {
-        console.error(`Validation error in row ${state.totalCount}: ${errorMessages}`);
-        console.error(`Data: ${JSON.stringify(row)}`);
+        console.error(`validation error in row ${state.totalCount}: ${errorMessages}`);
+        console.error(`data: ${JSON.stringify(row)}`);
       }
     } else {
       if (state.invalidCount <= 10 || state.invalidCount % 1000 === 0) {
-        console.error(`Error in row ${state.totalCount}: ${err instanceof Error ? err.message : String(err)}`);
-        console.error(`Data: ${JSON.stringify(row)}`);
+        console.error(`error in row ${state.totalCount}: ${err instanceof Error ? err.message : String(err)}`);
+        console.error(`data: ${JSON.stringify(row)}`);
       }
     }
     
@@ -182,8 +181,8 @@ export class ContactImporter {
     console.log(`CSV parsing complete => total: ${state.totalCount}, valid: ${state.validCount}, invalid: ${state.invalidCount}`);
     
     if (state.failedBatches.length > 0 && !state.error) {
-      console.log(`Found ${state.failedBatches.length} failed batches due to timeouts`);
-      console.log(`Note: Batches ${state.failedBatches.join(', ')} failed and may need manual processing`);
+      console.log(`found ${state.failedBatches.length} failed batches due to timeouts`);
+      console.log(`batches ${state.failedBatches.join(', ')} failed and may need manual processing`);
     }
     
     if (state.error) {
@@ -201,7 +200,7 @@ export class ContactImporter {
       return;
     }
     
-    console.log(`Import completed successfully`);
+    console.log(`import completed successfully`);
     resolve({ 
       success: true, 
       stats: {
@@ -213,7 +212,7 @@ export class ContactImporter {
   }
   
   private resolveWithError(state: ImportState, resolve: (result: ImportResults) => void): void {
-    console.log(`Import failed due to error: ${state.error}`);
+    console.log(`import failed due to error: ${state.error}`);
     resolve({ 
       success: false, 
       error: state.error,
@@ -228,11 +227,11 @@ export class ContactImporter {
   private async saveRemainingContacts(state: ImportState, resolve: (result: ImportResults) => void): Promise<void> {
     try {
       state.currentBatch++;
-      console.log(`Saving final batch ${state.currentBatch} with ${state.contacts.length} contacts`);
+      console.log(`saving final batch ${state.currentBatch} with ${state.contacts.length} contacts`);
       await this.contactService.saveContacts(state.contacts);
-      console.log(`Final batch saved successfully`);
+      console.log(`final batch saved successfully`);
       
-      console.log(`Import completed successfully`);
+      console.log(`import completed successfully`);
       resolve({ 
         success: true, 
         stats: {
@@ -242,7 +241,7 @@ export class ContactImporter {
         }
       });
     } catch (err) {
-      console.log(`Error saving final batch: ${err instanceof Error ? err.message : String(err)}`);
+      console.log(`error saving final batch: ${err instanceof Error ? err.message : String(err)}`);
       state.error = err instanceof Error ? err.message : 'Unknown error during import';
       
       this.resolveWithError(state, resolve);
@@ -250,7 +249,7 @@ export class ContactImporter {
   }
   
   private resolveWithNoValidContacts(state: ImportState, resolve: (result: ImportResults) => void): void {
-    console.error(`Import failed: no valid contacts found`);
+    console.error(`import failed: no valid contacts found`);
     resolve({ 
       success: false, 
       error: 'No valid contacts found in CSV',

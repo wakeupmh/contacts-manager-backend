@@ -26,11 +26,11 @@ export class PostgresContactRepository implements ContactRepository {
 
   async saveMany(contacts: Contact[]): Promise<void> {
     if (contacts.length === 0) {
-      console.log("No contacts to save, skipping");
+      console.log("no contacts to save, skipping");
       return;
     }
 
-    console.log(`Saving ${contacts.length} contacts to database`);
+    console.log(`saving ${contacts.length} contacts to database`);
 
     let retries = 0;
     const maxRetries = 3;
@@ -49,7 +49,7 @@ export class PostgresContactRepository implements ContactRepository {
       } catch (error) {
         if (client) {
           await this.handleTransactionError(client, error);
-
+          
           if (this.shouldRetry(error, retries, maxRetries)) {
             retries++;
             await this.delay(retryDelay);
@@ -72,7 +72,7 @@ export class PostgresContactRepository implements ContactRepository {
   }
 
   private releaseClient(client: any) {
-    console.log("Releasing client back to pool");
+    console.log("releasing client back to pool");
     client.release();
   }
 
@@ -82,15 +82,15 @@ export class PostgresContactRepository implements ContactRepository {
     maxRetries: number
   ) {
     console.log(
-      `Beginning transaction (attempt ${retryCount + 1}/${maxRetries + 1})`
+      `beginning transaction (attempt ${retryCount + 1}/${maxRetries + 1})`
     );
     await client.query("BEGIN");
   }
 
   private async commitTransaction(client: any) {
-    console.log("Committing transaction");
+    console.log("committing transaction");
     await client.query("COMMIT");
-    console.log("Transaction committed successfully");
+    console.log("transaction committed successfully");
   }
 
   private async handleTransactionError(client: any, error: unknown) {
@@ -99,9 +99,9 @@ export class PostgresContactRepository implements ContactRepository {
 
     try {
       await client.query("ROLLBACK");
-      console.log("Transaction rolled back successfully");
+      console.log("transaction rolled back successfully");
     } catch (rollbackError) {
-      console.error("Failed to rollback transaction:", rollbackError);
+      console.error("failed to rollback transaction:", rollbackError);
     }
   }
 
@@ -120,7 +120,7 @@ export class PostgresContactRepository implements ContactRepository {
         error.message.includes("connection"))
     ) {
       console.log(
-        `Retry attempt ${
+        `retry attempt ${
           currentRetry + 1
         }/${maxRetries} will be performed due to recoverable error`
       );
@@ -131,7 +131,7 @@ export class PostgresContactRepository implements ContactRepository {
   }
 
   private async delay(ms: number): Promise<void> {
-    console.log(`Waiting ${ms}ms before retry`);
+    console.log(`waiting ${ms}ms before retry`);
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
@@ -251,13 +251,13 @@ export class PostgresContactRepository implements ContactRepository {
 
       if (rejected.length > batchContacts.length / 2) {
         throw new Error(
-          `Too many operations failed in batch ${batchNumber} (${rejected.length}/${batchContacts.length})`
+          `too many operations failed in batch ${batchNumber} (${rejected.length}/${batchContacts.length})`
         );
       }
     }
 
     console.log(
-      `Batch ${batchNumber}/${totalBatches} completed: ${fulfilled} successful, ${rejected.length} failed`
+      `batch ${batchNumber}/${totalBatches} completed: ${fulfilled} successful, ${rejected.length} failed`
     );
   }
 
