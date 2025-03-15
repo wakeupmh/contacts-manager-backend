@@ -16,7 +16,7 @@ export const createDatabasePool = (): Pool => {
     ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
     max: parseInt(process.env.DB_POOL_MAX || '20'),
     idleTimeoutMillis: parseInt(process.env.DB_POOL_IDLE_TIMEOUT || '30000'),
-    connectionTimeoutMillis: parseInt(process.env.DB_POOL_CONNECTION_TIMEOUT || '5000'),
+    connectionTimeoutMillis: parseInt(process.env.DB_POOL_CONNECTION_TIMEOUT || '300000'), // 5 minutes
     statement_timeout: parseInt(process.env.DB_STATEMENT_TIMEOUT || '180000') // 3 minutes
   });
   
