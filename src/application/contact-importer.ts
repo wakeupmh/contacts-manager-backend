@@ -3,7 +3,7 @@ import csvParser from 'csv-parser';
 import { Contact } from '../domain/entities/contact';
 import { ContactService } from '../domain/services/contact-service';
 import { ContactSchema } from '../domain/validation/contact-schema';
-import { z } from 'zod';
+import { Transform } from 'stream';
 
 interface ImportResults {
   success: boolean;
@@ -24,253 +24,239 @@ interface ImportState {
   batchSize: number;
   failedBatches: number[];
   error?: string;
+  startTime: number;
+}
+
+/**
+ * Custom transform stream that batches contacts and processes them
+ */
+class BatchProcessor extends Transform {
+  private buffer: Contact[] = [];
+  private state: ImportState;
+  private contactService: ContactService;
+  
+  constructor(state: ImportState, contactService: ContactService) {
+    super({ objectMode: true, highWaterMark: 50 });
+    this.state = state;
+    this.contactService = contactService;
+  }
+  
+  _transform(contact: Contact, encoding: string, callback: Function) {
+    this.buffer.push(contact);
+    this.state.validCount++;
+    this.state.totalCount++;
+    
+    if (this.buffer.length >= this.state.batchSize) {
+      this.processBatch()
+        .then(() => callback())
+        .catch(err => callback(err));
+    } else {
+      callback();
+    }
+  }
+  
+  _flush(callback: Function) {
+    if (this.buffer.length > 0) {
+      this.processBatch()
+        .then(() => callback())
+        .catch(err => callback(err));
+    } else {
+      callback();
+    }
+  }
+  
+  private async processBatch(): Promise<void> {
+    try {
+      const batch = [...this.buffer];
+      this.buffer = [];
+      
+      this.state.currentBatch++;
+      const batchNumber = this.state.currentBatch;
+      
+      if (batchNumber % 5 === 0) {
+        const elapsedSeconds = (Date.now() - this.state.startTime) / 1000;
+        const ratePerSecond = Math.round(this.state.totalCount / elapsedSeconds);
+        console.log(`batch ${batchNumber}: saving ${batch.length} contacts (total: ${this.state.totalCount}, rate: ${ratePerSecond}/sec)`);
+      }
+      
+      await this.contactService.saveContacts(batch);
+      
+      if (batchNumber % 20 === 0 && this.state.batchSize < 500) {
+        this.state.batchSize = Math.min(500, Math.floor(this.state.batchSize * 1.1));
+        console.log(`adjusted batch size to ${this.state.batchSize}`);
+      }
+    } catch (err) {
+      console.error(`error in batch ${this.state.currentBatch}:`, err);
+      this.state.failedBatches.push(this.state.currentBatch);
+      
+      if (this.state.batchSize > 50) {
+        this.state.batchSize = Math.max(50, Math.floor(this.state.batchSize * 0.7));
+        console.log(`reduced batch size to ${this.state.batchSize} due to error`);
+      }
+      
+      if (err instanceof Error && 
+          !err.message.includes('timeout') && 
+          !err.message.includes('network')) {
+        this.state.error = err.message;
+      }
+    }
+  }
+}
+
+class ContactValidator extends Transform {
+  private columns: { email?: string; firstName?: string; lastName?: string };
+  private state: ImportState;
+  
+  constructor(columns: { email?: string; firstName?: string; lastName?: string }, state: ImportState) {
+    super({ objectMode: true });
+    this.columns = columns;
+    this.state = state;
+  }
+  
+  _transform(row: { [key: string]: string }, encoding: string, callback: Function) {
+    try {
+      const contact = this.validateAndCreateContact(row);
+      callback(null, contact); 
+    } catch (err) {
+      this.state.invalidCount++;
+      this.state.totalCount++;
+      
+      if (this.state.invalidCount % 100 === 0) {
+        console.warn(`${this.state.invalidCount} validation errors out of ${this.state.totalCount} total rows`);
+      }
+      
+      callback();
+    }
+  }
+  
+  private validateAndCreateContact(row: { [key: string]: string }): Contact {
+    if (!this.columns.email || !this.columns.firstName) {
+      throw new Error('Required columns not identified');
+    }
+    
+    const input = {
+      email: row[this.columns.email],
+      firstName: row[this.columns.firstName],
+      lastName: this.columns.lastName ? row[this.columns.lastName] : undefined
+    };
+    
+    const validatedData = ContactSchema.parse(input);
+    return Contact.fromInput(validatedData);
+  }
 }
 
 export class ContactImporter {
   constructor(
     private readonly contactService: ContactService,
-    private readonly batchSize: number = 200
+    private readonly initialBatchSize: number = 100
   ) {}
 
   async importFromCsv(fileStream: Readable): Promise<ImportResults> {
-    console.log(`starting CSV import process with batch size: ${this.batchSize}`);
+    console.log(`Starting CSV import process with initial batch size: ${this.initialBatchSize}`);
     
-    return new Promise((resolve) => {
-      const state: ImportState = {
-        contacts: [],
-        validCount: 0,
-        invalidCount: 0,
-        totalCount: 0,
-        currentBatch: 0,
-        batchSize: this.batchSize,
-        failedBatches: []
+    const state: ImportState = {
+      contacts: [],
+      validCount: 0,
+      invalidCount: 0,
+      totalCount: 0,
+      currentBatch: 0,
+      batchSize: this.initialBatchSize,
+      failedBatches: [],
+      startTime: Date.now()
+    };
+    
+    try {
+      const columns = await this.identifyColumnsFromStream(fileStream);
+      
+      if (!columns.email || !columns.firstName) {
+        throw new Error(`Missing required columns: ${!columns.email ? 'email' : ''} ${!columns.firstName ? 'first name' : ''}`);
+      }
+      
+      const dataStream = fileStream.pipe(csvParser({ 
+        strict: true, 
+        skipLines: 1,
+      }));
+      
+      const validator = new ContactValidator(columns, state);
+      const batchProcessor = new BatchProcessor(state, this.contactService);
+      
+      await new Promise<void>((resolve, reject) => {
+        dataStream
+          .pipe(validator)
+          .pipe(batchProcessor)
+          .on('finish', () => {
+            if (state.failedBatches.length > 0) {
+              console.warn(`${state.failedBatches.length} batches failed during import`);
+            }
+            
+            resolve();
+          })
+          .on('error', (err) => {
+            console.error('stream processing error:', err);
+            reject(err);
+          });
+      });
+      
+      return {
+        success: !state.error,
+        error: state.error,
+        stats: {
+          total: state.totalCount,
+          valid: state.validCount,
+          invalid: state.invalidCount
+        }
       };
       
+    } catch (err) {
+      console.error('error during CSV import:', err);
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+        stats: {
+          total: state.totalCount,
+          valid: state.validCount,
+          invalid: state.invalidCount
+        }
+      };
+    }
+  }
+  
+  private async identifyColumnsFromStream(fileStream: Readable): Promise<{ email?: string; firstName?: string; lastName?: string }> {
+    return new Promise((resolve, reject) => {
       const columns = {
         email: undefined as string | undefined,
         firstName: undefined as string | undefined,
         lastName: undefined as string | undefined
       };
       
-      let headersChecked = false;
+      const headerParser = csvParser();
       
-      fileStream
-        .pipe(csvParser())
-        .on('headers', (headers: string[]) => {
-          this.identifyColumns(headers, columns);
+      headerParser.once('headers', (headers: string[]) => {
+        try {
+          columns.email = headers.find((header: string) => header.toLowerCase() === 'email');
+          columns.firstName = headers.find((header: string) => 
+            header.toLowerCase() === 'first_name' || 
+            header.toLowerCase() === 'firstname' ||
+            header.toLowerCase() === 'first name'
+          );
+          columns.lastName = headers.find((header: string) => 
+            header.toLowerCase() === 'last_name' || 
+            header.toLowerCase() === 'lastname' ||
+            header.toLowerCase() === 'last name'
+          );
           
-          if (!columns.email || !columns.firstName) {
-            state.error = 'CSV must contain email and first name columns';
-            console.error(`Missing required columns: ${!columns.email ? 'email' : ''} ${!columns.firstName ? 'first name' : ''}`);
-            fileStream.resume();
-            return;
-          }
-          
-          headersChecked = true;
-        })
-        .on('data', async (row: { [key: string]: string }) => {
-          if (!headersChecked || !columns.email || !columns.firstName) return;
-          
-          state.totalCount++;
-          
-          this.logProgress(state.totalCount, state.batchSize);
-          
-          try {
-            const contact = this.validateAndCreateContact(row, columns);
-            state.contacts.push(contact);
-            state.validCount++;
-            
-            if (state.contacts.length >= state.batchSize) {
-              fileStream.pause();
-              await this.processBatch(state, fileStream);
-            }
-          } catch (err) {
-            this.handleValidationError(err, row, state);
-          }
-        })
-        .on('end', async () => {
-          await this.finishImport(state, resolve);
-        })
-        .on('error', (err: unknown) => {
-          this.handleCsvParsingError(err, state, resolve);
-        });
-    });
-  }
-  
-  private identifyColumns(headers: string[], columns: { email?: string; firstName?: string; lastName?: string }): void {
-    columns.email = headers.find((header: string) => header.toLowerCase() === 'email');
-    columns.firstName = headers.find((header: string) => header.toLowerCase() === 'first_name');
-    columns.lastName = headers.find((header: string) => header.toLowerCase() === 'last_name');
-    
-    console.log(`identifying columns - email: ${columns.email}, first name: ${columns.firstName}, last name: ${columns.lastName}`);
-  }
-  
-  private logProgress(totalCount: number, batchSize: number): void {
-    if (totalCount % (batchSize * 5) === 0) {
-      console.log(`processing progress: ${totalCount} rows processed so far`);
-    }
-  }
-  
-  private validateAndCreateContact(
-    row: { [key: string]: string }, 
-    columns: { email?: string; firstName?: string; lastName?: string }
-  ): Contact {
-    if (!columns.email || !columns.firstName) {
-      throw new Error('Required columns missing');
-    }
-    
-    const validatedData = ContactSchema.parse({
-      email: row[columns.email],
-      firstName: row[columns.firstName],
-      lastName: columns.lastName ? row[columns.lastName] : null
-    });
-    
-    return Contact.fromInput(validatedData);
-  }
-  
-  private async processBatch(state: ImportState, fileStream: Readable): Promise<void> {
-    try {
-      state.currentBatch++;
-      console.log(`Saving batch ${state.currentBatch} with ${state.contacts.length} contacts (processed ${state.totalCount} rows so far)`);
-      
-      const startTime = Date.now();
-      await this.contactService.saveContacts(state.contacts);
-      const duration = Date.now() - startTime;
-      
-      console.log(`batch ${state.currentBatch} saved successfully in ${duration}ms`);
-    } catch (err) {
-      console.error(`Error saving batch ${state.currentBatch}: ${err instanceof Error ? err.message : String(err)}`);
-      
-      if (err instanceof Error && err.message.includes('timeout')) {
-        state.failedBatches.push(state.currentBatch);
-        
-        state.batchSize = 50;
-        console.log(`reduced batch size to ${state.batchSize} due to timeout`);
-      } else {
-        state.error = err instanceof Error ? err.message : 'Unknown error during import';
-      }
-    } finally {
-      state.contacts = [];
-      fileStream.resume();
-    }
-  }
-  
-  private handleValidationError(err: unknown, row: { [key: string]: string }, state: ImportState): void {
-    state.invalidCount++;
-    
-    if (err instanceof z.ZodError) {
-      const errorMessages = err.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
-      
-      if (state.invalidCount <= 10 || state.invalidCount % 1000 === 0) {
-        console.error(`validation error in row ${state.totalCount}: ${errorMessages}`);
-        console.error(`data: ${JSON.stringify(row)}`);
-      }
-    } else {
-      if (state.invalidCount <= 10 || state.invalidCount % 1000 === 0) {
-        console.error(`error in row ${state.totalCount}: ${err instanceof Error ? err.message : String(err)}`);
-        console.error(`data: ${JSON.stringify(row)}`);
-      }
-    }
-    
-    if (state.invalidCount % state.batchSize === 0) {
-      console.error(`${state.invalidCount} validation errors so far out of ${state.totalCount} total rows`);
-    }
-  }
-  
-  private async finishImport(state: ImportState, resolve: (result: ImportResults) => void): Promise<void> {
-    console.log(`CSV parsing complete => total: ${state.totalCount}, valid: ${state.validCount}, invalid: ${state.invalidCount}`);
-    
-    if (state.failedBatches.length > 0 && !state.error) {
-      console.log(`found ${state.failedBatches.length} failed batches due to timeouts`);
-      console.log(`batches ${state.failedBatches.join(', ')} failed and may need manual processing`);
-    }
-    
-    if (state.error) {
-      this.resolveWithError(state, resolve);
-      return;
-    }
-    
-    if (state.contacts.length > 0) {
-      await this.saveRemainingContacts(state, resolve);
-      return;
-    }
-    
-    if (state.validCount === 0) {
-      this.resolveWithNoValidContacts(state, resolve);
-      return;
-    }
-    
-    console.log(`import completed successfully`);
-    resolve({ 
-      success: true, 
-      stats: {
-        valid: state.validCount,
-        invalid: state.invalidCount,
-        total: state.totalCount
-      }
-    });
-  }
-  
-  private resolveWithError(state: ImportState, resolve: (result: ImportResults) => void): void {
-    console.log(`import failed due to error: ${state.error}`);
-    resolve({ 
-      success: false, 
-      error: state.error,
-      stats: {
-        valid: state.validCount,
-        invalid: state.invalidCount,
-        total: state.totalCount
-      }
-    });
-  }
-  
-  private async saveRemainingContacts(state: ImportState, resolve: (result: ImportResults) => void): Promise<void> {
-    try {
-      state.currentBatch++;
-      console.log(`saving final batch ${state.currentBatch} with ${state.contacts.length} contacts`);
-      await this.contactService.saveContacts(state.contacts);
-      console.log(`final batch saved successfully`);
-      
-      console.log(`import completed successfully`);
-      resolve({ 
-        success: true, 
-        stats: {
-          valid: state.validCount,
-          invalid: state.invalidCount,
-          total: state.totalCount
+          headerParser.destroy();
+          resolve(columns);
+        } catch (err) {
+          reject(err);
         }
       });
-    } catch (err) {
-      console.log(`error saving final batch: ${err instanceof Error ? err.message : String(err)}`);
-      state.error = err instanceof Error ? err.message : 'Unknown error during import';
       
-      this.resolveWithError(state, resolve);
-    }
-  }
-  
-  private resolveWithNoValidContacts(state: ImportState, resolve: (result: ImportResults) => void): void {
-    console.error(`import failed: no valid contacts found`);
-    resolve({ 
-      success: false, 
-      error: 'No valid contacts found in CSV',
-      stats: {
-        valid: 0,
-        invalid: state.invalidCount,
-        total: state.totalCount
-      }
-    });
-  }
-  
-  private handleCsvParsingError(err: unknown, state: ImportState, resolve: (result: ImportResults) => void): void {
-    console.log(`CSV parsing error: ${err instanceof Error ? err.message : String(err)}`);
-    resolve({ 
-      success: false, 
-      error: err instanceof Error ? err.message : String(err),
-      stats: {
-        valid: state.validCount,
-        invalid: state.invalidCount,
-        total: state.totalCount
-      }
+      headerParser.once('error', (err) => {
+        reject(err);
+      });
+      
+      fileStream.pipe(headerParser);
     });
   }
 }
