@@ -144,7 +144,7 @@ export class ContactImporter {
       if (err instanceof Error && err.message.includes('timeout')) {
         state.failedBatches.push(state.currentBatch);
         
-        state.batchSize = Math.max(100, Math.floor(state.batchSize / 2));
+        state.batchSize = 50;
         console.log(`reduced batch size to ${state.batchSize} due to timeout`);
       } else {
         state.error = err instanceof Error ? err.message : 'Unknown error during import';

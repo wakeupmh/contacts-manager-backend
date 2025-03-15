@@ -186,7 +186,7 @@ export class PostgresContactRepository implements ContactRepository {
         batchNumber % 5 === 0
       ) {
         console.log(
-          `Progress: ${progressPercent}% (${processedCount}/${totalContacts} contacts processed)`
+          `progress: ${progressPercent}% (${processedCount}/${totalContacts} contacts processed)`
         );
       }
     }
@@ -237,7 +237,7 @@ export class PostgresContactRepository implements ContactRepository {
       for (let i = 0; i < maxErrorsToLog; i++) {
         const error = (rejected[i] as PromiseRejectedResult).reason;
         console.error(
-          `error sample ${i + 1}/${maxErrorsToLog}: ${
+          `error ${i + 1}/${maxErrorsToLog}: ${
             error instanceof Error ? error.message : String(error)
           }`
         );
@@ -245,7 +245,7 @@ export class PostgresContactRepository implements ContactRepository {
 
       if (rejected.length > maxErrorsToLog) {
         console.error(
-          `... and ${rejected.length - maxErrorsToLog} more errors`
+          `${rejected.length - maxErrorsToLog} more errors`
         );
       }
 
